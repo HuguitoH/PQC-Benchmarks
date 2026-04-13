@@ -1,0 +1,10 @@
+# Includes all analysis dependencies
+-r requirements.txt
+
+# RPi 5 hardware — not installable on standard machines
+adafruit-circuitpython-ina219==3.4.4
+adafruit-blinka==8.20.1
+RPi.GPIO==0.7.1
+psutil==5.9.5
+oqs==0.9.0
+cryptography==41.0.3

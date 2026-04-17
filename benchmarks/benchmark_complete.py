@@ -14,18 +14,22 @@ from helpers import (
     get_ina219_reading,
     wait_cooldown
 )
-from adafruit_ina219 import INA219
+from pathlib import Path
+from __future__ import annotations
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from adafruit_ina219 import INA219
 
 # General configuration
 ITERATIONS = 1000
 WARMUP_ITERATIONS = 10
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'results')
-os.makedirs(DATA_DIR, exist_ok=True)
+DATA_DIR: Path = Path(__file__).parent.parent / 'data' / 'results'
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Auxiliar functions
 def save_results(results: list[dict], filename: str) -> None:
     """Save benchmark results to a CSV file."""
-    filepath = os.path.join(DATA_DIR, filename)
+    filepath = DATA_DIR / filename
     with open(filepath, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=results[0].keys())
         writer.writeheader()
@@ -312,7 +316,7 @@ def benchmark_ecdsa256(iterations: int, warmup: int, ina: INA219 | None) -> None
 
 def main() -> None:
     print()
-    print("PQC Benchmark vs Traditional - n=1000 interations")
+    print("PQC Benchmark vs Traditional - n=1000 iterations")
     print()
     print(f"Configuration: {ITERATIONS} iter/op, warm-up {WARMUP_ITERATIONS}")
     print(f"Directory: {DATA_DIR}/")

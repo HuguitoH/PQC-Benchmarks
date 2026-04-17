@@ -19,4 +19,8 @@ venv/
 env/
 
 
+# Figures (generated HTML files)
+figures/dark/html/*
+figures/light/html/*
+
 

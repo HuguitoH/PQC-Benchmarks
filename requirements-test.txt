@@ -1,0 +1,8 @@
+# Test dependencies only — used by CI and local test runs
+# Does not include analysis stack (plotly, qiskit, jupyter, etc.)
+# Full analysis: pip install -r requirements.txt
+
+pandas==2.3.3
+numpy==2.2.4
+scipy==1.16.2
+pytest==9.0.3

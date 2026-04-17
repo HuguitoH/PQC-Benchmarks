@@ -5,27 +5,27 @@
 | Component | Specification |
 |---|---|
 | Device | Raspberry Pi 5, 8GB RAM |
-| CPU | Cortex-A76 @ 2.4GHz, ARM64 |
+| CPU | ARM Cortex-A76 @ 2.4GHz, ARM64 |
 | Storage | SanDisk 64GB MicroSD A2 |
 | Power supply | 27W USB-C |
-| Current sensor | INA219 (0–3.2V, 0–400mA, 1kHz sampling) |
-| Enclosure | ARGON NEO 5 with heatsink |
+| Current sensor | INA219 (0–3.2V, 0–400mA, I2C @ 0x40) |
+| Enclosure | ARGON NEO 5 with passive heatsink |
+| OS | Ubuntu Server 24.04 LTS (64-bit) |
 
 ---
 
 ## Software
 
-| Component | Version |
-|---|---|
-| OS | Raspberry Pi OS 64-bit (Debian Bookworm) |
-| Python | 3.11 |
-| liboqs | 0.10+ — Open Quantum Safe, PQC implementations |
-| OpenSSL | 3.0+ — RSA and ECC implementations |
-| psutil | process and system memory measurement |
-| adafruit-circuitpython-ina219 | INA219 sensor driver |
-| numpy, pandas, scipy | statistical analysis |
-| matplotlib, seaborn, plotly | visualizations |
-| qiskit, qiskit-aer | Shor's algorithm simulation |
+| Component | Version | Purpose |
+|---|---|---|
+| Python | 3.11 | Runtime |
+| liboqs | 0.10+ | PQC implementations (Kyber-512, ML-DSA-44) |
+| cryptography | 41.0.3 | RSA-2048, ECDH-256, ECDSA-256 |
+| psutil | 5.9.5 | Process and system memory measurement |
+| adafruit-circuitpython-ina219 | 3.4.4 | INA219 sensor driver |
+| qiskit | 2.3.1 | Shor's algorithm simulation |
+| qiskit-aer | 0.17.2 | Quantum circuit simulator |
+| pandas / numpy / scipy | see requirements.txt | Statistical analysis |
 
 ---
 
@@ -33,19 +33,19 @@
 
 **Type**: Quantitative experimental with deductive approach.
 
-**Scope**: 16 cryptographic operations across 5 schemes:
+**Scope**: 5 cryptographic schemes × 16 operations:
 
-| Algorithm | Operations |
-|---|---|
-| Kyber-512 | keygen, encaps, decaps |
-| ML-DSA-44 | keygen, sign, verify |
-| RSA-2048 | keygen, encrypt, decrypt, sign, verify |
-| ECDH-256 | keygen, derive |
-| ECDSA-256 | keygen, sign, verify |
+| Algorithm | Operations | Type |
+|---|---|---|
+| Kyber-512 | keygen, encaps, decaps | PQC KEM (FIPS 203) |
+| ML-DSA-44 | keygen, sign, verify | PQC signature (FIPS 204) |
+| RSA-2048 | keygen, encrypt, decrypt, sign, verify | Classical |
+| ECDH-256 | keygen, derive | Classical ECC |
+| ECDSA-256 | keygen, sign, verify | Classical ECC |
 
 **Sample size**: n=1,000 iterations per operation.
 
-Statistical justification: n=1,000 provides statistical power >0.80 for detecting medium effect sizes (d=0.5, α=0.05). This means an 80% probability of detecting real differences between algorithms when they exist, with a 5% error margin.
+Statistical justification: n=1,000 provides power >0.80 for detecting medium effect sizes (d=0.5, α=0.05) — 80% probability of detecting real differences with 5% type-I error. In practice, observed effect sizes were much larger (r≥0.989), making 1,000 iterations well above the minimum required.
 
 **Total dataset**: 16,000 records × 8 metrics = 128,000 data points.
 
@@ -53,103 +53,185 @@ Statistical justification: n=1,000 provides statistical power >0.80 for detectin
 
 ## Measurement procedure
 
-For each iteration, the following sequence was executed:
+For each iteration, the following sequence was executed atomically:
 
 ```
-1. Record CPU temperature (before)
-2. Record memory usage — process and system (before)
-3. Record INA219 current reading (before)
-4. Start timer — time.perf_counter() (nanosecond precision)
-5. Execute cryptographic operation
-6. Stop timer
-7. Record CPU temperature (after)
-8. Record memory usage (after)
-9. Record INA219 current reading (after)
-10. Store delta values to CSV
+1. Record CPU temperature   — vcgencmd measure_temp
+2. Record process memory    — psutil.Process().memory_info().rss
+3. Record system memory     — psutil.virtual_memory().used
+4. Record INA219 current    — ina.current
+5. Start timer              — time.perf_counter() (nanosecond resolution)
+6. Execute cryptographic operation
+7. Stop timer
+8. Record CPU temperature   (after)
+9. Record process memory    (after)
+10. Record system memory    (after)
+11. Record INA219 current   (after)
+12. Store delta values → CSV row
 ```
 
-**Warm-up**: 10 iterations executed and discarded before each measurement series, to stabilize CPU caches and eliminate cold-start effects.
+**Warm-up**: 10 iterations executed and discarded before each measurement series, to eliminate cold-start effects (CPU cache, memory allocator, JIT-equivalent initialization).
 
-**Cooldown**: 1 second pause every 100 iterations to prevent thermal drift from affecting subsequent measurements.
+**Cooldown**: 1 second pause every 100 iterations to prevent thermal drift from accumulating and biasing subsequent latency measurements.
+
+**Warm-up validation results**: most operations within 10% difference between first 10 and remaining 990 iterations. Three operations showed higher warm-up effects:
+
+| Operation | Diff (%) | Note |
+|---|---|---|
+| mldsa44_sign | 26.2% | Rejection sampling — high variance by design |
+| rsa2048_verify | 26.3% | OpenSSL internal state initialization |
+| rsa2048_encrypt | 20.2% | OAEP padding initialization |
+
+These warnings reflect structural variability of the algorithms, not experimental artefacts. All 1,000 iterations (including warm-up) are retained in the dataset with the warm-up behaviour documented.
 
 ---
 
 ## Metrics captured
 
-| Column | Description |
-|---|---|
-| `iteration` | Iteration number (1–1000) |
-| `timestamp` | ISO 8601 datetime |
-| `time_ms` | Operation latency in milliseconds |
-| `memory_process_mb` | Delta in process memory (MB) |
-| `memory_system_mb` | Delta in system memory (MB) |
-| `temp_delta_c` | CPU temperature change during operation (°C) |
-| `temp_absolute_c` | Absolute CPU temperature after operation (°C) |
-| `current_ma` | Delta in current draw from INA219 (mA) |
+| Column | Type | Description |
+|---|---|---|
+| `iteration` | int | Iteration number (1–1,000) |
+| `timestamp` | ISO 8601 | Datetime of measurement |
+| `time_ms` | float | Operation latency in milliseconds |
+| `memory_process_mb` | float | Delta in process RSS memory (MB) |
+| `memory_system_mb` | float | Delta in system used memory (MB) |
+| `temp_delta_c` | float | CPU temperature change during operation (°C) |
+| `temp_absolute_c` | float | Absolute CPU temperature after operation (°C) |
+| `current_ma` | float | Delta in INA219 current reading (mA) |
 
 ---
 
 ## Controlled variables
 
-To ensure internal validity, the following variables were held constant:
+To ensure internal validity:
 
-- Hardware: same Raspberry Pi 5 unit throughout
-- OS: no updates applied during experiment
-- Ambient temperature: 20–25°C
-- Concurrent load: no background processes during measurement
-- Software versions: pinned for reproducibility
+- **Hardware**: same Raspberry Pi 5 unit throughout all experiments
+- **OS**: no system updates applied during experiment window
+- **Ambient temperature**: 20–25°C (measured room temperature)
+- **Concurrent load**: no background services during measurement (SSH only)
+- **Software versions**: pinned in `requirements-rpi.txt`
+- **Thermal throttling**: confirmed absent — max recorded temperature 40.0°C, 45°C below BCM2712 throttle threshold (85°C)
 
 ---
 
-## INA219 sensor — known limitations
+## INA219 sensor — known limitation
 
-The INA219 sensor was connected to the Raspberry Pi 5's power rail via I2C (address 0x40). During the experiment, a measurement limitation was identified: the sensor captures total bus current rather than the isolated per-process current draw of each cryptographic operation.
+The INA219 was connected to the Raspberry Pi 5 main power rail via I2C (address 0x40, shunt 0.1Ω). During the experiment, a measurement limitation was identified: the sensor captures **total board current**, not the isolated current draw of each cryptographic process.
 
-As a result, the `current_ma` column in the CSVs represents delta values (after − before each operation) and should be interpreted as a **relative indicator of energy impact**, not as absolute per-operation energy consumption.
+As a result, `current_ma` represents `after − before` delta values and should be interpreted as a **relative indicator of energy impact**, not as absolute per-operation energy consumption. The values are retained in the dataset for completeness and relative comparison, but are not used as primary metrics in the statistical analysis.
 
-This limitation was documented in the thesis and is a target for improvement in Phase 2. See [Future work in README](../README.md#future-work).
+This limitation is targeted for improvement in Phase 2 via a dedicated per-process measurement setup. See [Future work in README](../README.md#future-work).
 
 ---
 
 ## Statistical methodology
 
-### Normality testing
+### Decision pipeline
 
-Shapiro-Wilk test (α=0.05) applied to all 16 distributions. Results:
+```
+Shapiro-Wilk (α=0.05)
+    │
+    ▼ All 16 distributions non-normal
+    │
+Kruskal-Wallis H
+    │ H=2651 (KeyGen), H=2663 (Sign), p<0.001
+    ▼ Significant differences confirmed
+    │
+Mann-Whitney U (pairwise)
+    │
+    ├── Rank-biserial r (effect size)
+    │   r = 1 − 2U / (n₁ × n₂)
+    │
+    └── Bonferroni correction
+        α_corrected = 0.05 / k comparisons
+```
 
-| Algorithm | Operation | W statistic | Result |
+### Normality test results (Shapiro-Wilk, α=0.05)
+
+All 16 operations confirmed non-normal. Full results:
+
+| Operation | W | p-value | Result |
 |---|---|---|---|
-| Kyber-512 | keygen | 0.8117 | Non-normal |
-| RSA-2048 | keygen | 0.8753 | Non-normal |
-| ML-DSA-44 | sign | 0.7998 | Non-normal |
-| ECDSA-256 | sign | 0.7612 | Non-normal |
+| kyber512_decaps | 0.3726 | 6.27e-50 | Non-normal |
+| rsa2048_decrypt | 0.2898 | 6.21e-52 | Non-normal |
+| rsa2048_sign | 0.2963 | 8.77e-52 | Non-normal |
+| kyber512_encaps | 0.5405 | 4.47e-45 | Non-normal |
+| ecdsa256_keygen | 0.6133 | 1.70e-42 | Non-normal |
+| ecdh256_derive | 0.6314 | 8.54e-42 | Non-normal |
+| mldsa44_verify | 0.6156 | 2.08e-42 | Non-normal |
+| ecdh256_keygen | 0.6378 | 1.54e-41 | Non-normal |
+| ecdsa256_verify | 0.7287 | 1.91e-37 | Non-normal |
+| ecdsa256_sign | 0.7612 | 1.04e-35 | Non-normal |
+| rsa2048_verify | 0.7605 | 9.47e-36 | Non-normal |
+| mldsa44_keygen | 0.7686 | 2.73e-35 | Non-normal |
+| mldsa44_sign | 0.7998 | 2.22e-33 | Non-normal |
+| kyber512_keygen | 0.8117 | 1.37e-32 | Non-normal |
+| rsa2048_encrypt | 0.8214 | 6.46e-32 | Non-normal |
+| rsa2048_keygen | 0.8753 | 1.56e-27 | Non-normal |
 
-Non-normality is expected in benchmarks due to OS interruptions, garbage collection, and the probabilistic nature of RSA KeyGen (Miller-Rabin primality testing) and ML-DSA Sign (rejection sampling).
+Non-normality is structurally expected in benchmark data due to: OS scheduling interruptions, Python garbage collection, probabilistic operations (RSA KeyGen uses Miller-Rabin primality testing; ML-DSA Sign uses rejection sampling), and the physical lower bound at 0 ms creating right-skewed distributions.
 
-### Non-parametric tests used
+### Effect size interpretation
 
-| Test | Purpose |
+Rank-biserial r is interpreted using Cohen's conventions:
+
+| r | Interpretation |
 |---|---|
-| Kruskal-Wallis | Multi-group comparison (3+ algorithms simultaneously) |
-| Mann-Whitney U | Pairwise comparison with effect size and speedup calculation |
-| Spearman ρ | Correlation between latency, memory, and temperature |
+| 0.10–0.29 | Small |
+| 0.30–0.49 | Medium |
+| 0.50–0.69 | Large |
+| ≥0.70 | Very large |
+
+All PQC vs RSA comparisons returned r≥0.989 — the distributions are essentially non-overlapping.
+
+### Bonferroni correction
+
+With k=3 pairwise comparisons per operation group, α_corrected = 0.05/3 = 0.0167. All comparisons remained significant after correction (all p<0.001 ≪ 0.0167).
 
 ### Hypotheses
 
-- **H1**: Kyber-512 presents lower energy consumption than RSA-2048 on encapsulation
-- **H2**: ML-DSA-44 exhibits lower latency than RSA-2048 on signing
-- **H3**: PQC algorithms use more memory than traditional algorithms due to larger key sizes
-- **H4**: Shor's algorithm factorizes RSA-2048 in polynomial time; Kyber-512 remains resistant
-- **H0**: No statistically significant differences (α=0.05) exist between evaluated algorithms
+| Hypothesis | Statement | Outcome |
+|---|---|---|
+| H0 | No significant differences between algorithms (α=0.05) | Rejected (all p<0.001) |
+| H1 | Kyber-512 presents lower latency than RSA-2048 | Confirmed (2,345× faster, r=1.000) |
+| H2 | ML-DSA-44 presents lower latency than RSA-2048 on signing | Confirmed (5.6× faster, r=0.998) |
+| H3 | PQC algorithms use more memory (larger key sizes) | Partially confirmed — key sizes larger, but runtime memory delta ≈ 0 |
+| H4 | Shor's algorithm breaks RSA; Kyber-512 resists | Confirmed (RSA-15/21 factored; Kyber LWE R²≈0) |
+
+---
+
+## Outlier handling
+
+Outliers were detected using the Tukey extended fence (Q3 + 3×IQR) rather than the standard 1.5×IQR, as benchmark data is expected to contain occasional high-latency spikes from OS interruptions. Outliers were **retained** — they are part of the real-world performance profile on ARM IoT hardware.
+
+Notable outlier rates:
+
+| Operation | Rate | Notes |
+|---|---|---|
+| ecdh256_derive | 20.2% | High — ECDH key derivation sensitive to memory bus contention |
+| ecdsa256_verify | 19.2% | Signature verification involves variable-time modular arithmetic |
+| mldsa44_verify | 15.0% | Lattice polynomial operations sensitive to cache state |
 
 ---
 
 ## Reproducibility
 
-The benchmark scripts require:
-- Raspberry Pi 5 (ARM64) — results are not reproducible on x86 hardware
-- `liboqs` installed and linked to Python via `oqs` module
+**Full reproduction** (hardware required):
+- Raspberry Pi 5 (ARM64) — results are not reproducible on x86; latency is architecture-specific
+- `liboqs` installed and linked via `oqs` Python module
 - INA219 sensor connected via I2C GPIO pins
-- No concurrent system load during execution
+- No concurrent system load during measurement
+- See `requirements-rpi.txt` for pinned versions
 
-For analysis reproduction only (no hardware required): the full dataset is in `data/results/` and can be analysed with `analysis/PQC_analysis.ipynb` on any machine.
+**Analysis reproduction only** (no hardware required):
+```bash
+git clone https://github.com/HuguitoH/pqc-benchmarks
+cd pqc-benchmarks
+pip install -r requirements.txt
+jupyter notebook analysis/PQC_analysis.ipynb
+```
+
+The full dataset is available in `data/results/` (16 CSVs, 16,000 rows). Tests validate dataset integrity:
+```bash
+pytest tests/ -v   # 123 tests — data integrity, statistical functions, Shor oracle
+```

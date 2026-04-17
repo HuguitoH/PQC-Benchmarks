@@ -1,0 +1,35 @@
+# .github/workflows/tests.yml
+# Runs the test suite on every push and pull request to main.
+# Tests cover: data integrity (16 CSVs), statistical functions, Shor oracle.
+# Hardware-dependent tests (INA219, RPi GPIO) are not included — they require
+# physical Raspberry Pi 5 hardware and cannot run in CI.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short

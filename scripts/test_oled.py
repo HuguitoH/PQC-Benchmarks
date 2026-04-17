@@ -1,35 +1,54 @@
-#!/usr/bin/env python3
 """
-Test de la pantalla OLED
+SSD1306 OLED display validation script.
+
+Renders a test screen on a 128×64 OLED connected via I2C at address 0x3C.
+Requires Raspberry Pi 5 with the display wired to the I2C bus.
+
+Usage:
+    python scripts/test_oled.py
 """
 
 import board
 import busio
-from PIL import Image, ImageDraw, ImageFont
 import adafruit_ssd1306
+from PIL import Image, ImageDraw
 
-# Crear conexión I2C
-i2c = busio.I2C(board.SCL, board.SDA)
+_OLED_WIDTH  = 128
+_OLED_HEIGHT = 64
+_I2C_ADDR    = 0x3C
 
-# Crear objeto de pantalla (128x64 pixels, dirección 0x3C)
-oled = adafruit_ssd1306.SSD1306_I2C(128, 64, i2c, addr=0x3C)
+_LINES = [
+    "Quantum Lab",
+    "Raspberry Pi 5",
+    "Setup OK!",
+    "Hugo H.M. — TFG 2026",
+]
+_LINE_HEIGHT = 16   # pixels between lines
 
-# Limpiar pantalla
-oled.fill(0)
-oled.show()
 
-# Crear imagen
-image = Image.new("1", (oled.width, oled.height))
-draw = ImageDraw.Draw(image)
+def build_test_image(width: int, height: int) -> Image.Image:
+    """Render test text onto a 1-bit image."""
+    image = Image.new("1", (width, height))
+    draw  = ImageDraw.Draw(image)
+    for i, line in enumerate(_LINES):
+        draw.text((0, i * _LINE_HEIGHT), line, fill=255)
+    return image
 
-# Dibujar texto
-draw.text((0, 0), "Quantum Lab", fill=255)
-draw.text((0, 16), "Raspberry Pi 5", fill=255)
-draw.text((0, 32), "Setup OK!", fill=255)
-draw.text((0, 48), "By Hugo H.M.", fill=255)
 
-# Mostrar en pantalla
-oled.image(image)
-oled.show()
+def main() -> None:
+    """Validate OLED display by rendering a test screen."""
+    i2c  = busio.I2C(board.SCL, board.SDA)
+    oled = adafruit_ssd1306.SSD1306_I2C(_OLED_WIDTH, _OLED_HEIGHT, i2c, addr=_I2C_ADDR)
 
-print("Pantalla OLED funcionando")
+    oled.fill(0)
+    oled.show()
+
+    image = build_test_image(oled.width, oled.height)
+    oled.image(image)
+    oled.show()
+
+    print("OLED display OK")
+
+
+if __name__ == "__main__":
+    main()

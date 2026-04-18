@@ -227,4 +227,20 @@ The quantum threat timeline is estimated at 2028–2035 for cryptographically re
 
 ---
 
+## Citation
+
+If you use this dataset or analysis in your research, please cite:
+
+```bibtex
+@misc{hernandez2026pqc,
+  author    = {Hernández Moreno, Hugo},
+  title     = {PQC Benchmarks: Empirical evaluation of post-quantum
+               cryptography on ARM64 IoT hardware},
+  year      = {2026},
+  publisher = {GitHub},
+  url       = {https://github.com/HuguitoH/PQC-Benchmarks}
+}
+````
+---
+
 **Hugo Hernández Moreno** · MSMK University · 2025/2026 · [github.com/HuguitoH](https://github.com/HuguitoH)
